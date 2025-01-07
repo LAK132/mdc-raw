@@ -340,14 +340,11 @@ lak::optional<int> basic_program_init(int argc, char **argv)
 		}
 	}
 
-#ifdef LAK_OS_APPLE
-	basic_window_force_software = true;
-#endif
-
-	basic_window_target_framerate      = 30;
-	basic_window_opengl_settings.major = 3;
-	basic_window_opengl_settings.minor = 2;
-	basic_window_clear_colour          = {0.0f, 0.0f, 0.0f, 1.0f};
+	basic_window_target_framerate                = 30;
+	basic_window_opengl_settings.major           = 3;
+	basic_window_opengl_settings.minor           = 2;
+	basic_window_opengl_settings.double_buffered = true;
+	basic_window_clear_colour                    = {0.0f, 0.0f, 0.0f, 1.0f};
 	basic_imgui_main_window_flags =
 	  ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoScrollbar |
 	  ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoSavedSettings |
