@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '*'
+  workflow_dispatch:
+
+jobs:
+  create-release:
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      tag: ${{ steps.get_tag.outputs.TAG }}
+    runs-on: windows-2022
+    steps:
+      - run: echo "TAG=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+        shell: bash
+        id: get_tag
+      - uses: softprops/action-gh-release@v1
+        id: create_release
+        with:
+          token: ${{ github.token }}
+          draft: false
+          prerelease: true
+          name: mdc-raw ${{ github.ref_name }}
+          tag_name: ${{ github.ref }}
+          body:
+          body_path: CHANGELOG.md
+
+  build:
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022]
+        arch: [x86, x64]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9.x'
+
+      - if: startsWith(matrix.os, 'windows')
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+          # toolset: 19
+          vsversion: 2022
+      - if: startsWith(matrix.os, 'windows')
+        run: |
+          python3 -m pip install --upgrade pip setuptools wheel
+          python3 -m pip install meson ninja
+
+      - if: startsWith(matrix.os, 'ubuntu')
+        uses: egor-tensin/setup-gcc@v1
+        with:
+          version: 11
+          platform: ${{ matrix.arch }}
+      - if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo python3 -m pip install --upgrade pip setuptools wheel
+          sudo python3 -m pip install meson ninja
+
+      - if: startsWith(matrix.os, 'macos')
+        run: |
+          brew install meson ninja
+          echo "CC=$(brew --prefix llvm@15)/bin/clang" >> $GITHUB_ENV
+          echo "CXX=$(brew --prefix llvm@15)/bin/clang++" >> $GITHUB_ENV
+
+      - run: meson setup build --buildtype debugoptimized
+      - run: meson compile -C build mdc
+
+      - if: startsWith(matrix.os, 'windows')
+        run: |
+          Compress-Archive -Path build\mdc.exe, build\mdc.pdb -DestinationPath mdc-raw-${{ needs.create-release.outputs.tag }}-${{ runner.os }}-${{ matrix.arch }}.zip
+      # - if: startsWith(matrix.os, 'ubuntu')
+      #   run: make .deb and .zip
+      # - if: startsWith(matrix.os, 'macos')
+      #   run: make .dmg and .zip
+      - uses: softprops/action-gh-release@v1
+        with:
+          token: ${{ github.token }}
+          fail_on_unmatched_files: true
+          files: mdc-raw-${{ needs.create-release.outputs.tag }}-${{ runner.os }}-${{ matrix.arch }}.zip
