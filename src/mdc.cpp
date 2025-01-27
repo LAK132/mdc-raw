@@ -1,6 +1,7 @@
 #include "mdc.hpp"
 
 #include <lak/binary_reader.hpp>
+#include <lak/compiler.hpp>
 #include <lak/integer_range.hpp>
 
 #include <execution>
@@ -334,51 +335,57 @@ lak::image3_t mdc_raw::process() const
 		        b_sample};
 	};
 
+	auto process_sample = [&](const size_t i) -> lak::color3_t
+	{
+		const size_t x = i % result.size().x;
+		const size_t y = i / result.size().x;
+
+		const size_t _y =
+		  size_t(((uint64_t(y) * 10U * 8U) / aspect_ratio.y) + inset.y + offset.y);
+		const size_t r_y  = red_offset.y < 0
+		                      ? _y - std::min(_y, size_t(-red_offset.y))
+		                      : _y + size_t(red_offset.y);
+		const size_t g1_y = green1_offset.y < 0
+		                      ? _y - std::min(_y, size_t(-green1_offset.y))
+		                      : _y + size_t(green1_offset.y);
+		const size_t g2_y = green2_offset.y < 0
+		                      ? _y - std::min(_y, size_t(-green2_offset.y))
+		                      : _y + size_t(green2_offset.y);
+		const size_t b_y  = blue_offset.y < 0
+		                      ? _y - std::min(_y, size_t(-blue_offset.y))
+		                      : _y + size_t(blue_offset.y);
+
+		const size_t _x =
+		  size_t(((uint64_t(x) * 10U * 8U) / aspect_ratio.x) + inset.x + offset.x);
+		const size_t r_x =
+		  (red_offset.x < 0 ? _y - std::min(_x, size_t(-red_offset.x))
+		                    : _x + size_t(red_offset.x)) /
+		  2U;
+		const size_t g1_x = green1_offset.x < 0
+		                      ? _y - std::min(_x, size_t(-green1_offset.x))
+		                      : _x + size_t(green1_offset.x);
+		const size_t g2_x = green2_offset.x < 0
+		                      ? _y - std::min(_x, size_t(-green2_offset.x))
+		                      : _x + size_t(green2_offset.x);
+		const size_t b_x =
+		  (blue_offset.x < 0 ? _y - std::min(_x, size_t(-blue_offset.x))
+		                     : _x + size_t(blue_offset.x)) /
+		  2U;
+
+		return sample({r_x, r_y}, {g1_x, g1_y}, {g2_x, g2_y}, {b_x, b_y});
+	};
+
+#ifdef LAK_COMPILER_MSVC
 	std::ranges::iota_view range(size_t(0U), size_t(result.contig_size()));
-	std::transform(
-	  std::execution::par_unseq,
-	  range.begin(),
-	  range.end(),
-	  result.data(),
-	  [&](const size_t i) -> lak::color3_t
-	  {
-		  const size_t x = i % result.size().x;
-		  const size_t y = i / result.size().x;
-
-		  const size_t _y   = size_t(((uint64_t(y) * 10U * 8U) / aspect_ratio.y) +
-                               inset.y + offset.y);
-		  const size_t r_y  = red_offset.y < 0
-		                        ? _y - std::min(_y, size_t(-red_offset.y))
-		                        : _y + size_t(red_offset.y);
-		  const size_t g1_y = green1_offset.y < 0
-		                        ? _y - std::min(_y, size_t(-green1_offset.y))
-		                        : _y + size_t(green1_offset.y);
-		  const size_t g2_y = green2_offset.y < 0
-		                        ? _y - std::min(_y, size_t(-green2_offset.y))
-		                        : _y + size_t(green2_offset.y);
-		  const size_t b_y  = blue_offset.y < 0
-		                        ? _y - std::min(_y, size_t(-blue_offset.y))
-		                        : _y + size_t(blue_offset.y);
-
-		  const size_t _x = size_t(((uint64_t(x) * 10U * 8U) / aspect_ratio.x) +
-		                           inset.x + offset.x);
-		  const size_t r_x =
-		    (red_offset.x < 0 ? _y - std::min(_x, size_t(-red_offset.x))
-		                      : _x + size_t(red_offset.x)) /
-		    2U;
-		  const size_t g1_x = green1_offset.x < 0
-		                        ? _y - std::min(_x, size_t(-green1_offset.x))
-		                        : _x + size_t(green1_offset.x);
-		  const size_t g2_x = green2_offset.x < 0
-		                        ? _y - std::min(_x, size_t(-green2_offset.x))
-		                        : _x + size_t(green2_offset.x);
-		  const size_t b_x =
-		    (blue_offset.x < 0 ? _y - std::min(_x, size_t(-blue_offset.x))
-		                       : _x + size_t(blue_offset.x)) /
-		    2U;
-
-		  return sample({r_x, r_y}, {g1_x, g1_y}, {g2_x, g2_y}, {b_x, b_y});
-	  });
+	std::transform(std::execution::par_unseq,
+	               range.begin(),
+	               range.end(),
+	               result.data(),
+	               process_sample);
+#else
+	for (size_t i = 0; i < result.contig_size(); ++i)
+		result[i] = process_sample(i);
+#endif
 
 	return result;
 }
