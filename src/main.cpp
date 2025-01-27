@@ -292,7 +292,6 @@ struct main_window : bex::basic_window<main_window>
 					     ++y)
 					{
 						const size_t _yr = y * 0x180U;
-						const size_t _y  = y * 0x300U;
 						const size_t _yd = (y + diff_offset[1]) * 0x300U;
 						for (size_t x = -std::min(0, diff_offset[0]);
 						     x < size_t(0x300U - std::max(0, diff_offset[0]));
@@ -316,7 +315,6 @@ struct main_window : bex::basic_window<main_window>
 					     ++y)
 					{
 						const size_t _yr = y * 0x180U;
-						const size_t _y  = y * 0x300U;
 						const size_t _yd = (y + diff_offset[1]) * 0x300U;
 						for (size_t x = -std::min(0, diff_offset[0]);
 						     x < size_t(0x300U - std::max(0, diff_offset[0]));
