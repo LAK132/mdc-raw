@@ -273,9 +273,6 @@ lak::result<mdc_raw, lak::out_of_data_error> mdc_raw::make(
 		}
 	}
 
-	// TODO: there's 6 more rows of pixels at the end that make up the last 2
-	// rows of pixels per sensor.
-
 	return lak::move_ok(res);
 }
 
