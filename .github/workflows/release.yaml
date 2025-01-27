@@ -25,7 +25,6 @@ jobs:
           name: mdc-raw ${{ github.ref_name }}
           tag_name: ${{ github.ref }}
           body:
-          body_path: CHANGELOG.md
 
   build:
     needs: create-release
