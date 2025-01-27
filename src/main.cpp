@@ -13,7 +13,11 @@
 #include <lak/strconv.hpp>
 #include <lak/test.hpp>
 
+#include <stb_image_write.h>
+
 #include <filesystem>
+
+#include <inttypes.h>
 
 #define LAK_BASIC_PROGRAM_IMGUI_WINDOW_IMPL
 #include <lak/basic_program.inl>
@@ -28,7 +32,10 @@ lak::array<byte_t> binary;
 lak::optional<mdc_raw> raw_file;
 bool binary_update = false, raw_update = false;
 
-bex::texture rtex, g1tex, g1dtex, g2tex, g2dtex, btex, rgbtex, gdifftex;
+lak::image3_t processedimg;
+
+bex::texture rtex, g1tex, g1dtex, g2tex, g2dtex, btex, rgbtex, gdifftex,
+  rg1difftex, rg2difftex, processedtex;
 
 void load_binary(lak::fs::path path)
 {
@@ -91,6 +98,17 @@ struct main_window : bex::basic_window<main_window>
 
 	static void open_file(const lak::fs::path &path) { load_binary_async(path); }
 
+	static void save_file(const lak::fs::path &path)
+	{
+		stbi_write_png(
+		  (const char *)path.u8string().c_str(),
+		  int(processedimg.size().x),
+		  int(processedimg.size().y),
+		  3,
+		  processedimg.data(),
+		  int(processedimg.contig_size_bytes() / processedimg.size().y));
+	}
+
 	static const lak::fs::path &file_path() { return binary_path; }
 
 	static lak::span<byte_t> file_data() { return lak::span(binary); }
@@ -98,6 +116,28 @@ struct main_window : bex::basic_window<main_window>
 	static lak::graphics_mode graphics_mode() { return ::graphics_mode; }
 
 	static bool update() { return binary_update || raw_update; }
+
+	static void file_menu()
+	{
+		static lak::path_getter open_pgetter, save_pgetter;
+		if (auto res = open_pgetter(); res) open_file(*res);
+		if (auto res = save_pgetter(); res) save_file(*res);
+
+		if (ImGui::BeginMenu("File"))
+		{
+			if (ImGui::MenuItem("Open...", nullptr, false))
+				open_pgetter.open_file(file_path(),
+				                       "Minolta RD-175 Raw Files{.MDC},.*");
+
+			if (ImGui::MenuItem(
+			      "Save...", nullptr, false, processedimg.contig_size() != 0U))
+				save_pgetter.save_file(file_path().parent_path() /
+				                         (file_path().stem().u8string() + u8".PNG"),
+				                       "Image Files{.PNG},.*");
+
+			ImGui::EndMenu();
+		}
+	}
 
 	static void main_region(float frame_time)
 	{
@@ -136,6 +176,11 @@ struct main_window : bex::basic_window<main_window>
 		else
 		{
 			static int diff_offset[2] = {0, 0};
+
+			static int r_offset[2]  = {8, 0};
+			static int g1_offset[2] = {8, 0};
+			static int g2_offset[2] = {12, 4};
+			static int b_offset[2]  = {0, 0};
 
 			if (raw_update)
 			{
@@ -239,6 +284,70 @@ struct main_window : bex::basic_window<main_window>
 					}
 					gdifftex = bex::create_texture(gdiffimg, graphics_mode());
 				}
+				{
+					lak::image4_t rg1diffimg;
+					rg1diffimg.resize({0x300U, 0x1EEU});
+					for (size_t y = -std::min(0, diff_offset[1]);
+					     y < size_t(0x1EEU - std::max(0, diff_offset[1]));
+					     ++y)
+					{
+						const size_t _yr = y * 0x180U;
+						const size_t _y  = y * 0x300U;
+						const size_t _yd = (y + diff_offset[1]) * 0x300U;
+						for (size_t x = -std::min(0, diff_offset[0]);
+						     x < size_t(0x300U - std::max(0, diff_offset[0]));
+						     ++x)
+						{
+							uint8_t v =
+							  std::max(raw_file->red[(x / 2U) + _yr],
+							           raw_file->green1[(x + diff_offset[0]) + _yd]) -
+							  std::min(raw_file->red[(x / 2U) + _yr],
+							           raw_file->green1[(x + diff_offset[0]) + _yd]);
+							rg1diffimg[{x, y}] = lak::color4_t(v, 255 - v, v, 255);
+						}
+					}
+					rg1difftex = bex::create_texture(rg1diffimg, graphics_mode());
+				}
+				{
+					lak::image4_t rg2diffimg;
+					rg2diffimg.resize({0x300U, 0x1EEU});
+					for (size_t y = -std::min(0, diff_offset[1]);
+					     y < size_t(0x1EEU - std::max(0, diff_offset[1]));
+					     ++y)
+					{
+						const size_t _yr = y * 0x180U;
+						const size_t _y  = y * 0x300U;
+						const size_t _yd = (y + diff_offset[1]) * 0x300U;
+						for (size_t x = -std::min(0, diff_offset[0]);
+						     x < size_t(0x300U - std::max(0, diff_offset[0]));
+						     ++x)
+						{
+							uint8_t v =
+							  std::max(raw_file->red[(x / 2U) + _yr],
+							           raw_file->green2[(x + diff_offset[0]) + _yd]) -
+							  std::min(raw_file->red[(x / 2U) + _yr],
+							           raw_file->green2[(x + diff_offset[0]) + _yd]);
+							rg2diffimg[{x, y}] = lak::color4_t(v, 255 - v, v, 255);
+						}
+					}
+					rg2difftex = bex::create_texture(rg2diffimg, graphics_mode());
+				}
+				{
+					raw_file->red_offset = {int16_t(r_offset[0]), int16_t(r_offset[1])};
+					raw_file->green1_offset = {int16_t(g1_offset[0]),
+					                           int16_t(g1_offset[1])};
+					raw_file->green2_offset = {int16_t(g2_offset[0]),
+					                           int16_t(g2_offset[1])};
+					raw_file->blue_offset = {int16_t(b_offset[0]), int16_t(b_offset[1])};
+					processedimg          = raw_file->process();
+					lak::image4_t img2;
+					img2.resize(processedimg.size());
+					for (const auto i :
+					     lak::size_range_count(processedimg.contig_size()))
+						img2[i] = {
+						  processedimg[i].r, processedimg[i].g, processedimg[i].b, 255U};
+					processedtex = bex::create_texture(img2, graphics_mode());
+				}
 				raw_update = false;
 			}
 
@@ -252,12 +361,39 @@ struct main_window : bex::basic_window<main_window>
 
 				ImGui::BeginChild(
 				  "ImgLeft", {left_size, -1}, true, ImGuiWindowFlags_NoSavedSettings);
-				// bex::image_view(rgbtex, 2.0f);
-				// bex::image_view(g1tex, 2.0f);
-				// bex::image_view(g1dtex, 2.0f);
-				ImGui::SliderInt2("diff offset", diff_offset, -2, 2);
-				if (ImGui::IsItemDeactivatedAfterEdit()) raw_update = true;
-				bex::image_view(gdifftex, 3.0f);
+				LAK_TREE_NODE("Processed")
+				{
+					ImGui::SliderInt2("red offset", r_offset, -16, 16);
+					if (ImGui::IsItemDeactivatedAfterEdit()) raw_update = true;
+					ImGui::SliderInt2("green1 offset", g1_offset, -16, 16);
+					if (ImGui::IsItemDeactivatedAfterEdit()) raw_update = true;
+					ImGui::SliderInt2("green2 offset", g2_offset, -16, 16);
+					if (ImGui::IsItemDeactivatedAfterEdit()) raw_update = true;
+					ImGui::SliderInt2("blue offset", b_offset, -16, 16);
+					if (ImGui::IsItemDeactivatedAfterEdit()) raw_update = true;
+					bex::image_view(processedtex, 3.0f);
+				}
+				LAK_TREE_NODE("RGB") { bex::image_view(rgbtex, 2.0f); }
+				LAK_TREE_NODE("G1d") { bex::image_view(g1dtex, 2.0f); }
+				LAK_TREE_NODE("G2d") { bex::image_view(g2dtex, 2.0f); }
+				LAK_TREE_NODE("G diff")
+				{
+					ImGui::SliderInt2("diff offset", diff_offset, -2, 2);
+					if (ImGui::IsItemDeactivatedAfterEdit()) raw_update = true;
+					bex::image_view(gdifftex, 3.0f);
+				}
+				LAK_TREE_NODE("R G1 diff")
+				{
+					ImGui::SliderInt2("diff offset", diff_offset, -2, 2);
+					if (ImGui::IsItemDeactivatedAfterEdit()) raw_update = true;
+					bex::image_view(rg1difftex, 3.0f);
+				}
+				LAK_TREE_NODE("R G2 diff")
+				{
+					ImGui::SliderInt2("diff offset", diff_offset, -2, 2);
+					if (ImGui::IsItemDeactivatedAfterEdit()) raw_update = true;
+					bex::image_view(rg2difftex, 3.0f);
+				}
 				ImGui::EndChild();
 
 				ImGui::SameLine();
@@ -266,10 +402,18 @@ struct main_window : bex::basic_window<main_window>
 				                  {right_size, -1},
 				                  true,
 				                  ImGuiWindowFlags_NoSavedSettings);
-				bex::image_view(rtex, 2.0f);
-				bex::image_view(g2tex, 2.0f);
-				bex::image_view(g2dtex, 2.0f);
-				bex::image_view(btex, 2.0f);
+				LAK_TREE_NODE("Info")
+				{
+					ImGui::Text("Shutter Speed 0x%" PRIX8, raw_file->shutter_speed);
+					ImGui::Text("Aperture 0x%" PRIX8, raw_file->aperture);
+					ImGui::Text("Exposure Compensation %-+1.1f",
+					            float(raw_file->exposure_compensation) / 8.f);
+					ImGui::Text("Focal Length 0x%" PRIX8, raw_file->focal_length);
+				}
+				LAK_TREE_NODE("R") { bex::image_view(rtex, 2.0f); }
+				LAK_TREE_NODE("G1") { bex::image_view(g1tex, 2.0f); }
+				LAK_TREE_NODE("G2") { bex::image_view(g2tex, 2.0f); }
+				LAK_TREE_NODE("B") { bex::image_view(btex, 2.0f); }
 				ImGui::EndChild();
 			}
 		}
@@ -333,7 +477,7 @@ lak::optional<int> basic_program_init(int argc, char **argv)
 		{
 			if (lak::path_exists(argv[arg]).UNWRAP())
 			{
-				// :TODO: do something with the file
+				load_binary_async(lak::fs::path(argv[arg]));
 			}
 			else
 				FATAL("file ", argv[arg], " does not exists");
