@@ -361,15 +361,16 @@ struct main_window : bex::basic_window<main_window>
 				  "ImgLeft", {left_size, -1}, true, ImGuiWindowFlags_NoSavedSettings);
 				LAK_TREE_NODE("Processed")
 				{
-					ImGui::SliderInt2("red offset", r_offset, -16, 16);
+					ImGui::Text("Sensor Alignment (x1/8th of a pixel)");
+					ImGui::SliderInt2("Red", r_offset, -16, 16);
 					if (ImGui::IsItemDeactivatedAfterEdit()) raw_update = true;
-					ImGui::SliderInt2("green1 offset", g1_offset, -16, 16);
+					ImGui::SliderInt2("Green 1", g1_offset, -16, 16);
 					if (ImGui::IsItemDeactivatedAfterEdit()) raw_update = true;
-					ImGui::SliderInt2("green2 offset", g2_offset, -16, 16);
+					ImGui::SliderInt2("Green 2", g2_offset, -16, 16);
 					if (ImGui::IsItemDeactivatedAfterEdit()) raw_update = true;
-					ImGui::SliderInt2("blue offset", b_offset, -16, 16);
+					ImGui::SliderInt2("Blue", b_offset, -16, 16);
 					if (ImGui::IsItemDeactivatedAfterEdit()) raw_update = true;
-					bex::image_view(processedtex, 3.0f);
+					bex::image_view(processedtex, 1.0f);
 				}
 				LAK_TREE_NODE("RGB") { bex::image_view(rgbtex, 2.0f); }
 				LAK_TREE_NODE("G1d") { bex::image_view(g1dtex, 2.0f); }
