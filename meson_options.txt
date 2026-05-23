@@ -6,12 +6,6 @@ option('lak_enable_tests',
 	yield: false,
 )
 
-option('lak_enable_examples',
-	type: 'boolean',
-	value: true,
-	yield: false,
-)
-
 # windowing options
 
 option('lak_enable_windowing',
@@ -34,7 +28,7 @@ option('lak_run_windowing_tests',
 
 option('sdl2_from_source',
 	type: 'boolean',
-	value: false,
+	value: true,
 	yield: false,
 )
 
