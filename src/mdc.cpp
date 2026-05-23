@@ -1,13 +1,11 @@
 #include "mdc.hpp"
 
+#include <lak/algorithm.hpp>
 #include <lak/binary_reader.hpp>
-#include <lak/compiler.hpp>
 #include <lak/integer_range.hpp>
+#include <lak/system/compiler.hpp>
 
-#include <execution>
-#include <ranges>
-
-lak::result<mdc_raw, lak::out_of_data_error> mdc_raw::make(
+lak::result<mdc_raw, lak::err::out_of_data> mdc_raw::make(
   lak::span<const byte_t> source)
 {
 	lak::binary_reader strm{source};
@@ -332,10 +330,10 @@ lak::image3_t mdc_raw::process() const
 		        b_sample};
 	};
 
-	auto process_sample = [&](const size_t i) -> lak::color3_t
+	auto process_sample = [&](const lak::vec2s_t xy) -> lak::color3_t
 	{
-		const size_t x = i % result.size().x;
-		const size_t y = i / result.size().x;
+		const size_t x = xy.x;
+		const size_t y = xy.y;
 
 		const size_t _y =
 		  size_t(((uint64_t(y) * 10U * 8U) / aspect_ratio.y) + inset.y + offset.y);
@@ -372,16 +370,31 @@ lak::image3_t mdc_raw::process() const
 		return sample({r_x, r_y}, {g1_x, g1_y}, {g2_x, g2_y}, {b_x, b_y});
 	};
 
-#ifdef LAK_COMPILER_MSVC
-	std::ranges::iota_view range(size_t(0U), size_t(result.contig_size()));
-	std::transform(std::execution::par_unseq,
-	               range.begin(),
-	               range.end(),
-	               result.data(),
-	               process_sample);
+#if 0
+	for (size_t y = 0U; y < result.size().y; ++y)
+		for (size_t x = 0U; x < result.size().x; ++x)
+			result[{x, y}] = process_sample({x, y});
 #else
-	for (size_t i = 0; i < result.contig_size(); ++i)
-		result[i] = process_sample(i);
+	lak::threaded<lak::pair<size_t, lak::span<lak::color3_t>>>(
+	  [&](size_t id, auto inputs)
+	  {
+		  lak::while_some([&]() { return inputs[id].try_release(); },
+		                  [&](lak::pair<size_t, lak::span<lak::color3_t>> data)
+		                  {
+			                  auto [y, d] = data;
+			                  for (lak::vec2s_t xy{0U, y}; xy.x < d.size(); ++xy.x)
+				                  d[xy.x] = process_sample(xy);
+		                  });
+	  },
+	  [&](auto inputs)
+	  {
+		  auto data           = lak::span(result.data(), result.contig_size());
+		  const size_t stride = result.size().x;
+		  for (size_t i = 0U, y = 0U; y < result.size().y;
+		       ++y, i           = (i + 1U) % inputs.size())
+        inputs[i].emplace(y, data.subspan(y * stride, stride));
+		  for (auto &in : inputs) in.await_none();
+	  });
 #endif
 
 	return result;

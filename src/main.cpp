@@ -6,9 +6,9 @@
 
 #include <lak/imgui/widgets.hpp>
 
-#include <lak/opengl/state.hpp>
+#include <lak/system/file.hpp>
+#include <lak/system/opengl/state.hpp>
 
-#include <lak/file.hpp>
 #include <lak/future.hpp>
 #include <lak/strconv.hpp>
 #include <lak/test.hpp>
@@ -21,41 +21,6 @@
 
 #define LAK_BASIC_PROGRAM_IMGUI_WINDOW_IMPL
 #include <lak/basic_program.inl>
-
-int opengl_major, opengl_minor;
-lak::graphics_mode graphics_mode;
-bool force_only_error = false;
-
-lak::fs::path binary_path;
-lak::optional<lak::future<void>> binary_load;
-lak::array<byte_t> binary;
-lak::optional<mdc_raw> raw_file;
-bool binary_update = false, raw_update = false;
-
-lak::image3_t processedimg;
-
-bex::texture rtex, g1tex, g1dtex, g2tex, g2dtex, btex, rgbtex, gdifftex,
-  rg1difftex, rg2difftex, processedtex;
-
-void load_binary(lak::fs::path path)
-{
-	if (auto res = lak::read_file(path); res.is_ok())
-		binary = lak::move(res.unsafe_unwrap());
-	else
-		ERROR(res.unsafe_unwrap_err());
-
-	if (auto res = mdc_raw::make(lak::span(binary)); res.is_ok())
-		raw_file = lak::move(res.unsafe_unwrap());
-	else
-		ERROR(res.unsafe_unwrap_err());
-
-	binary_path = lak::move(path);
-}
-
-void load_binary_async(const lak::fs::path &path)
-{
-	binary_load = lak::async(load_binary, path);
-}
 
 lak::array<lak::image<lak::color4_t>, 4> image_change(const lak::image4_t &img)
 {
@@ -96,9 +61,52 @@ struct main_window : bex::basic_window<main_window>
 {
 	using super_window = bex::basic_window<main_window>;
 
-	static void open_file(const lak::fs::path &path) { load_binary_async(path); }
+	lak::path_getter open_pgetter, save_pgetter;
+	float time_acc = 0.0f;
 
-	static void save_file(const lak::fs::path &path)
+	int diff_offset[2] = {0, 0};
+
+	int r_offset[2]  = {8, 0};
+	int g1_offset[2] = {8, 0};
+	int g2_offset[2] = {12, 4};
+	int b_offset[2]  = {0, 0};
+
+	float left_size  = -1.f;
+	float right_size = -1.f;
+
+	lak::fs::path binary_path;
+	lak::optional<lak::future<void>> binary_load;
+	lak::array<byte_t> binary;
+	lak::optional<mdc_raw> raw_file;
+	bool binary_update = false, raw_update = false;
+
+	lak::image3_t processedimg;
+
+	bex::texture rtex, g1tex, g1dtex, g2tex, g2dtex, btex, rgbtex, gdifftex,
+	  rg1difftex, rg2difftex, processedtex;
+
+	void load_binary(lak::fs::path path)
+	{
+		if (auto res = lak::read_file(path); res.is_ok())
+			binary = lak::move(res.unsafe_unwrap());
+		else
+			ERROR(res.unsafe_unwrap_err());
+
+		if (auto res = mdc_raw::make(lak::span(binary)); res.is_ok())
+			raw_file = lak::move(res.unsafe_unwrap());
+		else
+			ERROR(res.unsafe_unwrap_err());
+
+		binary_path = lak::move(path);
+	}
+
+	void open_file(const lak::fs::path &path)
+	{
+		binary_load =
+		  lak::async([this](const lak::fs::path &p) { load_binary(p); }, path);
+	}
+
+	void save_file(const lak::fs::path &path)
 	{
 		stbi_write_png(
 		  (const char *)path.u8string().c_str(),
@@ -109,17 +117,14 @@ struct main_window : bex::basic_window<main_window>
 		  int(processedimg.contig_size_bytes() / processedimg.size().y));
 	}
 
-	static const lak::fs::path &file_path() { return binary_path; }
+	const lak::fs::path &file_path() { return binary_path; }
 
-	static lak::span<byte_t> file_data() { return lak::span(binary); }
+	lak::span<byte_t> file_data() { return lak::span(binary); }
 
-	static lak::graphics_mode graphics_mode() { return ::graphics_mode; }
+	bool update() { return binary_update || raw_update; }
 
-	static bool update() { return binary_update || raw_update; }
-
-	static void file_menu()
+	void file_menu()
 	{
-		static lak::path_getter open_pgetter, save_pgetter;
 		if (auto res = open_pgetter(); res) open_file(*res);
 		if (auto res = save_pgetter(); res) save_file(*res);
 
@@ -139,13 +144,12 @@ struct main_window : bex::basic_window<main_window>
 		}
 	}
 
-	static void main_region(float frame_time)
+	void main_region(float frame_time)
 	{
 		if (binary_load)
 		{
 			ImGui::BeginChild(
 			  "Mid", {-1, -1}, true, ImGuiWindowFlags_NoSavedSettings);
-			static float time_acc = 0.0f;
 			time_acc += frame_time;
 			if (time_acc > 3.0f) time_acc -= std::trunc(time_acc);
 			if (time_acc > 2.0f)
@@ -175,13 +179,6 @@ struct main_window : bex::basic_window<main_window>
 			super_window::main_region(frame_time);
 		else
 		{
-			static int diff_offset[2] = {0, 0};
-
-			static int r_offset[2]  = {8, 0};
-			static int g1_offset[2] = {8, 0};
-			static int g2_offset[2] = {12, 4};
-			static int b_offset[2]  = {0, 0};
-
 			if (raw_update)
 			{
 				{
@@ -196,7 +193,7 @@ struct main_window : bex::basic_window<main_window>
 							  lak::color4_t(raw_file->red[(x / 2U) + _y2], 0, 0, 255);
 						}
 					}
-					rtex = bex::create_texture(rimg, graphics_mode());
+					rtex.emplace(rimg);
 				}
 				{
 					lak::image4_t g1img;
@@ -210,9 +207,8 @@ struct main_window : bex::basic_window<main_window>
 							  lak::color4_t(0, raw_file->green1[x + _y], 0, 255);
 						}
 					}
-					g1tex = bex::create_texture(g1img, graphics_mode());
-					g1dtex =
-					  bex::create_texture(image_change(g1img)[1], graphics_mode());
+					g1tex.emplace(g1img);
+					g1dtex.emplace(image_change(g1img)[1]);
 				}
 				{
 					lak::image4_t g2img;
@@ -226,9 +222,8 @@ struct main_window : bex::basic_window<main_window>
 							  lak::color4_t(0, raw_file->green2[x + _y], 0, 255);
 						}
 					}
-					g2tex = bex::create_texture(g2img, graphics_mode());
-					g2dtex =
-					  bex::create_texture(image_change(g2img)[1], graphics_mode());
+					g2tex.emplace(g2img);
+					g2dtex.emplace(image_change(g2img)[1]);
 				}
 				{
 					lak::image4_t bimg;
@@ -242,7 +237,7 @@ struct main_window : bex::basic_window<main_window>
 							  lak::color4_t(0, 0, raw_file->blue[(x / 2U) + _y2], 255);
 						}
 					}
-					btex = bex::create_texture(bimg, graphics_mode());
+					btex.emplace(bimg);
 				}
 				{
 					lak::image4_t rgbimg;
@@ -259,7 +254,7 @@ struct main_window : bex::basic_window<main_window>
 							                               255);
 						}
 					}
-					rgbtex = bex::create_texture(rgbimg, graphics_mode());
+					rgbtex.emplace(rgbimg);
 				}
 				{
 					lak::image4_t gdiffimg;
@@ -282,7 +277,7 @@ struct main_window : bex::basic_window<main_window>
 							gdiffimg[{x, y}] = lak::color4_t(v, 255 - v, v, 255);
 						}
 					}
-					gdifftex = bex::create_texture(gdiffimg, graphics_mode());
+					gdifftex.emplace(gdiffimg);
 				}
 				{
 					lak::image4_t rg1diffimg;
@@ -305,7 +300,7 @@ struct main_window : bex::basic_window<main_window>
 							rg1diffimg[{x, y}] = lak::color4_t(v, 255 - v, v, 255);
 						}
 					}
-					rg1difftex = bex::create_texture(rg1diffimg, graphics_mode());
+					rg1difftex.emplace(rg1diffimg);
 				}
 				{
 					lak::image4_t rg2diffimg;
@@ -328,7 +323,7 @@ struct main_window : bex::basic_window<main_window>
 							rg2diffimg[{x, y}] = lak::color4_t(v, 255 - v, v, 255);
 						}
 					}
-					rg2difftex = bex::create_texture(rg2diffimg, graphics_mode());
+					rg2difftex.emplace(rg2diffimg);
 				}
 				{
 					raw_file->red_offset = {int16_t(r_offset[0]), int16_t(r_offset[1])};
@@ -344,7 +339,7 @@ struct main_window : bex::basic_window<main_window>
 					     lak::size_range_count(processedimg.contig_size()))
 						img2[i] = {
 						  processedimg[i].r, processedimg[i].g, processedimg[i].b, 255U};
-					processedtex = bex::create_texture(img2, graphics_mode());
+					processedtex.emplace(img2);
 				}
 				raw_update = false;
 			}
@@ -352,8 +347,11 @@ struct main_window : bex::basic_window<main_window>
 			{
 				const auto content_size{ImGui::GetContentRegionAvail()};
 
-				static float left_size  = content_size.x / 2;
-				static float right_size = content_size.x / 2;
+				if (left_size <= 0.f || right_size <= 0.f)
+				{
+					left_size  = content_size.x / 2;
+					right_size = content_size.x / 2;
+				}
 
 				lak::VertSplitter(left_size, right_size, content_size.x);
 
@@ -370,28 +368,28 @@ struct main_window : bex::basic_window<main_window>
 					if (ImGui::IsItemDeactivatedAfterEdit()) raw_update = true;
 					ImGui::SliderInt2("Blue", b_offset, -16, 16);
 					if (ImGui::IsItemDeactivatedAfterEdit()) raw_update = true;
-					bex::image_view(processedtex, 1.0f);
+					bex::view_image(processedtex, 1.0f);
 				}
-				LAK_TREE_NODE("RGB") { bex::image_view(rgbtex, 2.0f); }
-				LAK_TREE_NODE("G1d") { bex::image_view(g1dtex, 2.0f); }
-				LAK_TREE_NODE("G2d") { bex::image_view(g2dtex, 2.0f); }
+				LAK_TREE_NODE("RGB") { bex::view_image(rgbtex, 2.0f); }
+				LAK_TREE_NODE("G1d") { bex::view_image(g1dtex, 2.0f); }
+				LAK_TREE_NODE("G2d") { bex::view_image(g2dtex, 2.0f); }
 				LAK_TREE_NODE("G diff")
 				{
 					ImGui::SliderInt2("diff offset", diff_offset, -2, 2);
 					if (ImGui::IsItemDeactivatedAfterEdit()) raw_update = true;
-					bex::image_view(gdifftex, 3.0f);
+					bex::view_image(gdifftex, 3.0f);
 				}
 				LAK_TREE_NODE("R G1 diff")
 				{
 					ImGui::SliderInt2("diff offset", diff_offset, -2, 2);
 					if (ImGui::IsItemDeactivatedAfterEdit()) raw_update = true;
-					bex::image_view(rg1difftex, 3.0f);
+					bex::view_image(rg1difftex, 3.0f);
 				}
 				LAK_TREE_NODE("R G2 diff")
 				{
 					ImGui::SliderInt2("diff offset", diff_offset, -2, 2);
 					if (ImGui::IsItemDeactivatedAfterEdit()) raw_update = true;
-					bex::image_view(rg2difftex, 3.0f);
+					bex::view_image(rg2difftex, 3.0f);
 				}
 				ImGui::EndChild();
 
@@ -409,48 +407,121 @@ struct main_window : bex::basic_window<main_window>
 					            float(raw_file->exposure_compensation) / 8.f);
 					ImGui::Text("Focal Length 0x%" PRIX8, raw_file->focal_length);
 				}
-				LAK_TREE_NODE("R") { bex::image_view(rtex, 2.0f); }
-				LAK_TREE_NODE("G1") { bex::image_view(g1tex, 2.0f); }
-				LAK_TREE_NODE("G2") { bex::image_view(g2tex, 2.0f); }
-				LAK_TREE_NODE("B") { bex::image_view(btex, 2.0f); }
+				LAK_TREE_NODE("R") { bex::view_image(rtex, 2.0f); }
+				LAK_TREE_NODE("G1") { bex::view_image(g1tex, 2.0f); }
+				LAK_TREE_NODE("G2") { bex::view_image(g2tex, 2.0f); }
+				LAK_TREE_NODE("B") { bex::view_image(btex, 2.0f); }
 				ImGui::EndChild();
 			}
 		}
 	}
 };
 
-lak::optional<int> basic_program_init(int argc, char **argv)
+struct my_window : virtual public LAK_BASIC_PROGRAM(window_api)
 {
-	if (argc == 2 && argv[1] == lak::astring("--version"))
+	my_window() : LAK_BASIC_PROGRAM(window_api)() {}
+
+	main_window bex_window;
+
+	virtual void init() override final { window().set_title(L"" APP_NAME); }
+
+	virtual ~my_window() {}
+
+	virtual void handle_event(lak::event &event) override final
+	{
+		switch (event.type)
+		{
+			case lak::event_type::close_window:
+				destroy();
+				break;
+			case lak::event_type::dropfile:
+				bex_window.open_file(event.dropfile().path);
+				break;
+		}
+	}
+
+	virtual void loop(uint64_t counter_delta) override final
+	{
+		const float frame_time =
+		  (float)counter_delta / lak::performance_frequency();
+		bex_window.draw(frame_time);
+		if (bex_window.binary_update)
+		{
+			window().set_title(L"" APP_NAME " " +
+			                   bex_window.binary_path.generic_wstring());
+			bex_window.binary_update = false;
+		}
+	}
+};
+
+lak::optional<lak::fs::path> preload_file;
+
+lak::error_code<int> basic_program_preinit(lak::span<char *> args)
+{
+	if (!args.empty()) args = args.subspan(1U);
+
+	if (args.size() == 1U && args[0U] == lak::astring("--version"))
 	{
 		std::cout << APP_NAME << "\n";
-		return lak::optional<int>(0);
+		return lak::err_t{EXIT_SUCCESS};
 	}
 
 	lak::debugger.std_out(u8"", u8"" APP_NAME "\n");
 
-	for (int arg = 1; arg < argc; ++arg)
-	{
-		if (argv[arg] == lak::astring("-h") || argv[arg] == lak::astring("--help"))
-		{
-			std::cout << "mdc.exe "
-			             "[--help] "
-			             "[--nogl] "
-			             "[--onlyerr] "
-			             "[--listtests | --laktestall | --laktests \"test1;test2\"] "
-			             "[<filepath>]\n";
+	lak::debugger.crash_path = std::filesystem::current_path() /
+	                           "ATTACH-TO-ISSUE-ON-MDC-RAW-GITHUB-REPO.txt";
 
-			return lak::optional<int>(0);
+	lak::debugger.live_output_enabled = true;
+
+	for (size_t arg = 0U; arg < args.size(); ++arg)
+	{
+		if (args[arg] == lak::astring("-h") || args[arg] == lak::astring("--help"))
+		{
+			lak::debugger.std_out(
+			  u8"",
+			  u8"mdc.exe "
+			  "[--help] "
+			  "[--in-place] "
+			  "[--nogl] "
+			  "[--onlyerr] "
+			  "[--listtests | --laktestall | --laktests \"test1;test2\"] "
+			  "[<filepath>]\n");
+
+			return lak::err_t{0};
 		}
-		else if (argv[arg] == lak::astring("--nogl"))
+		else if (args[arg] == lak::astring("--in-place"))
+		{
+			++arg;
+			if (arg >= args.size()) FATAL("Missing file");
+			if (!lak::path_exists(args[arg]).UNWRAP())
+			{
+				FATAL("file ", args[arg], " does not exists");
+			}
+			auto in_path = lak::fs::path(args[arg]);
+			auto out_path =
+			  in_path.parent_path() / (in_path.stem().u8string() + u8".PNG");
+			lak::debugger.std_out(u8"", u8"Reading " + in_path.u8string() + u8"\n");
+			auto binary       = lak::read_file(in_path).UNWRAP();
+			auto raw_file     = mdc_raw::make(lak::span(binary)).UNWRAP();
+			auto processedimg = raw_file.process();
+			lak::debugger.std_out(u8"", u8"Writing " + out_path.u8string() + u8"\n");
+			return lak::err_t{stbi_write_png(
+			  (const char *)out_path.u8string().c_str(),
+			  int(processedimg.size().x),
+			  int(processedimg.size().y),
+			  3,
+			  processedimg.data(),
+			  int(processedimg.contig_size_bytes() / processedimg.size().y))};
+		}
+		else if (args[arg] == lak::astring("--nogl"))
 		{
 			basic_window_force_software = true;
 		}
-		else if (argv[arg] == lak::astring("--onlyerr"))
+		else if (args[arg] == lak::astring("--onlyerr"))
 		{
-			force_only_error = true;
+			lak::debugger.live_errors_only = true;
 		}
-		else if (argv[arg] == lak::astring("--listtests"))
+		else if (args[arg] == lak::astring("--listtests"))
 		{
 			lak::debugger.std_out(lak::u8string(),
 			                      lak::u8string(u8"Available tests:\n"));
@@ -460,26 +531,26 @@ lak::optional<int> basic_program_init(int argc, char **argv)
 				                      lak::to_u8string(name) + u8"\n");
 			}
 		}
-		else if (argv[arg] == lak::astring("--laktestall"))
+		else if (args[arg] == lak::astring("--laktestall"))
 		{
-			return lak::optional<int>(lak::run_tests());
+			return lak::err_t{lak::run_tests()};
 		}
-		else if (argv[arg] == lak::astring("--laktests") ||
-		         argv[arg] == lak::astring("--laktest"))
+		else if (args[arg] == lak::astring("--laktests") ||
+		         args[arg] == lak::astring("--laktest"))
 		{
 			++arg;
-			if (arg >= argc) FATAL("Missing tests");
-			return lak::optional<int>(lak::run_tests(
-			  lak::as_u8string(lak::astring_view::from_c_str(argv[arg]))));
+			if (arg >= args.size()) FATAL("Missing tests");
+			return lak::err_t{lak::run_tests(
+			  lak::as_u8string(lak::astring_view::from_c_str(args[arg])))};
 		}
 		else
 		{
-			if (lak::path_exists(argv[arg]).UNWRAP())
+			if (lak::path_exists(args[arg]).UNWRAP())
 			{
-				load_binary_async(lak::fs::path(argv[arg]));
+				preload_file = lak::fs::path(args[arg]);
 			}
 			else
-				FATAL("file ", argv[arg], " does not exists");
+				FATAL("file ", args[arg], " does not exists");
 		}
 	}
 
@@ -487,71 +558,39 @@ lak::optional<int> basic_program_init(int argc, char **argv)
 	basic_window_opengl_settings.major           = 3;
 	basic_window_opengl_settings.minor           = 2;
 	basic_window_opengl_settings.double_buffered = true;
-	basic_window_clear_colour                    = {0.0f, 0.0f, 0.0f, 1.0f};
-	basic_imgui_main_window_flags =
-	  ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoScrollbar |
-	  ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoSavedSettings |
-	  ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove;
 
-	basic_create_window().UNWRAP();
-
-	return lak::nullopt;
+	return lak::ok_t{};
 }
 
-bool mdc_raw_running = true;
-bool basic_program_loop(uint64_t counter_delta)
+lak::weak_ptr<LAK_BASIC_PROGRAM(window_instance<my_window>)> my_window_ptr;
+
+lak::error_code<int> basic_program_init()
 {
-	LAK_UNUSED(counter_delta);
-	return mdc_raw_running && !basic_window_instances.empty();
-}
-
-int basic_program_quit() { return EXIT_SUCCESS; }
-
-void basic_window_init(lak::window &window)
-{
-	lak::debugger.crash_path =
-	  std::filesystem::current_path() /
-	  "ATTACH-TO-ISSUE-ON-SOURCE-EXPLORER-GITHUB-REPO.txt";
-
-	lak::debugger.live_output_enabled = true;
-
-	graphics_mode = window.graphics();
-
-	DEBUG("Graphics: ", graphics_mode);
-	if (!lak::debugger.live_output_enabled || lak::debugger.live_errors_only)
-		std::cout << "Graphics: " << graphics_mode << "\n";
-
-	switch (graphics_mode)
+	auto map_str_err = [](lak::u8string err) -> int
 	{
-		case lak::graphics_mode::OpenGL:
-		{
-			opengl_major = lak::opengl::get_uint(GL_MAJOR_VERSION).UNWRAP();
-			opengl_minor = lak::opengl::get_uint(GL_MINOR_VERSION).UNWRAP();
-		}
-		break;
+		ERROR(err);
+		return EXIT_FAILURE;
+	};
 
-		default:
-			break;
+	RES_TRY_ASSIGN(
+	  my_window_ptr =,
+	  LAK_BASIC_PROGRAM(create_window<my_window>)().map_err(map_str_err));
+
+	{
+		auto p = my_window_ptr.get();
+		DEBUG_EXPR(p->window().graphics());
+		if (preload_file) p->bex_window.open_file(*preload_file);
 	}
 
-	window.set_title(L"MDC RAW");
+	return lak::ok_t{};
 }
 
-void basic_window_handle_event(lak::window *window, lak::event &event)
+void basic_program_handle_event(lak::event &event)
 {
 	switch (event.type)
 	{
-		case lak::event_type::close_window:
-			basic_destroy_window(*window);
-			ASSERT(!!window);
-			break;
-
 		case lak::event_type::quit_program:
-			mdc_raw_running = false;
-			break;
-
-		case lak::event_type::dropfile:
-			load_binary_async(lak::fs::path(event.dropfile().path));
+			for (auto &inst : basic_window_instances()) inst->destroy();
 			break;
 
 		default:
@@ -559,17 +598,14 @@ void basic_window_handle_event(lak::window *window, lak::event &event)
 	}
 }
 
-void basic_window_loop(lak::window &window, uint64_t counter_delta)
+bool basic_program_loop(uint64_t counter_delta)
 {
-	const float frame_time = (float)counter_delta / lak::performance_frequency();
-
-	main_window::draw(frame_time);
-
-	if (binary_update)
-	{
-		window.set_title(L"MDC RAW " + binary_path.generic_wstring());
-		binary_update = false;
-	}
+	LAK_UNUSED(counter_delta);
+	return !basic_window_instances().empty();
 }
 
-void basic_window_quit(lak::window &) {}
+int basic_program_quit()
+{
+	my_window_ptr.reset();
+	return EXIT_SUCCESS;
+}

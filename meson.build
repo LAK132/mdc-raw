@@ -1,43 +1,38 @@
 project(
 	'mdc-raw',
 	['c', 'cpp'],
-	default_options: [
-		# 'warning_level=3',
-		# 'werror=true',
-		'b_vscrt=static_from_buildtype',
-		# 'b_sanitize=undefined',
-	],
+	default_options: {
+		'c_std': 'c11',
+		'cpp_std': ['c++26', 'c++23', 'c++latest'],
+		'b_vscrt': 'static_from_buildtype',
+		'warning_level': '3',
+		'werror': false,
+	},
 )
 
 cxx = meson.get_compiler('cpp')
 
 if cxx.get_id() == 'msvc'
-	version = 'c++latest'
-
-	c_cpp_args = [
+	add_project_arguments(
 		'-DUNICODE',
 		'-DWIN32_LEAN_AND_MEAN',
 		'-DNOMINMAX',
 		'-wd4315',
 		'-wd4366',
+		'-wd4250',
 		'-Wv:18',
-	]
+		language: ['c', 'cpp'])
 
-	cpp_args = [
+	add_project_arguments(
 		'-Zc:__cplusplus',
 		'-Zc:rvalueCast',
 		'-Zc:wchar_t',
 		'-Zc:ternary',
 		'-Zc:preprocessor',
-	]
-
-	c_args = []
-
-	macro_test_args = c_cpp_args + cpp_args + ['-std:' + version]
+		language: ['cpp'])
 else
-	version = 'c++20'
-
-	c_cpp_args = [
+	add_project_arguments(
+		'-Wno-unknown-warning-option',
 		'-Wno-gnu-zero-variadic-macro-arguments',
 		'-Wno-language-extension-token',
 		'-Wno-dangling-else',
@@ -45,35 +40,46 @@ else
 		'-Wno-pragma-pack',
 		'-Wno-deprecated-declarations',
 		'-Wno-unused-private-field',
+		'-Wno-unused-variable',
+		'-Wno-init-list-lifetime',
 		'-Wno-invalid-partial-specialization',
+		'-Wno-missing-field-initializers',
+		'-Wno-maybe-uninitialized',
+		'-Wno-undefined-inline',
 		'-Wfatal-errors',
+		'-Wno-psabi',
 		# '-mavx',
-	]
+		language: ['c', 'cpp', 'objcpp'])
 
-	cpp_args = []
-
-	c_args = []
-
-	macro_test_args = c_cpp_args + cpp_args + ['-std=' + version]
+	if cxx.get_id() == 'gcc'
+		if cxx.has_link_argument('-Wl,-lstdc++_libbacktrace')
+			# GCC <14
+			add_project_link_arguments(
+				'-Wl,-lstdc++_libbacktrace',
+				language: ['cpp'])
+		elif cxx.has_link_argument('-Wl,-lstdc++exp')
+			# GCC >=14
+			add_project_link_arguments(
+				'-Wl,-lstdc++exp',
+				language: ['cpp'])
+		else
+			warning('Unable to determine backtrace library link argument')
+		endif
+	endif
 endif
 
-c_cpp_args += [
+add_project_arguments(
 	'-D_CRT_SECURE_NO_WARNINGS',
-	'-DSDL_MAIN_HANDLED',
-]
+	language: ['c', 'cpp'])
 
 if get_option('buildtype') != 'debug'
-	c_cpp_args += [ '-DNDEBUG' ]
+	add_project_arguments(
+		'-DNDEBUG',
+		language: ['c', 'cpp'])
 endif
 
-if get_option('lak_backend') == 'sdl'
-	c_cpp_args += [ '-DLAK_USE_SDL' ]
-elif get_option('lak_backend') == 'win32'
-	c_cpp_args += [ '-DLAK_USE_WINAPI' ]
-endif
-
-add_project_arguments(c_cpp_args + cpp_args, language: ['cpp'])
-add_project_arguments(c_cpp_args + c_args, language: ['c'])
+binex_subprj = subproject('binex')
+binex_core_dep = binex_subprj.get_variable('binex_core_dep')
 
 if host_machine.system() == 'windows'
 	git_header = custom_target(
@@ -91,15 +97,8 @@ else
 	)
 endif
 
-cplusplus = cxx.get_define('__cplusplus', args: macro_test_args)
-
-if cxx.compute_int(cplusplus) < 202002
-	error('C++ version insufficient, expected 202002L got ' + cplusplus)
-endif
-
 install_directory = host_machine.cpu_family()
 
-subdir('include')
 subdir('src')
 
 # if host_machine.system() == 'windows'
@@ -117,23 +116,14 @@ executable(
 	mdc + [git_header],
 	install: true,
 	install_dir: install_directory,
-	override_options: [
-		'cpp_std=' + version,
-		'warning_level=3',
-		'werror=true',
-	],
 	include_directories: include_directories([
 		'include',
-		# 'include/glm',
-		# 'include/imgui',
-		# 'include/imgui/misc/cpp',
-		# 'include/lak/include',
 	]),
 	dependencies: [
 		# lak_dep,
 		binex_core_dep,
-		stb_image_dep,
-		stb_image_write_dep,
+		dependency('stb_image'),
+		dependency('stb_image_write'),
 	],
 	link_args: [
 		# '/FORCE:MULTIPLE',

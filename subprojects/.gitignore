@@ -1,5 +1,6 @@
 packagecache/
 glm*.wrap
+ImFileDialog*.wrap
 imgui*.wrap
 lak.wrap
 SDL2*.wrap

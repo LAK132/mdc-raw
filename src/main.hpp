@@ -1,7 +1,7 @@
 #ifndef MDC_RAW_MAIN_HPP
 #define MDC_RAW_MAIN_HPP
 
-#include <lak/architecture.hpp>
+#include <lak/system/architecture.hpp>
 
 #include "git.hpp"
 #define APP_VERSION GIT_TAG "-" GIT_HASH

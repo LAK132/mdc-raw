@@ -32,7 +32,7 @@ public:
 	uint8_t autoness;
 	uint8_t focal_length;
 
-	static lak::result<mdc_raw, lak::out_of_data_error> make(
+	static lak::result<mdc_raw, lak::err::out_of_data> make(
 	  lak::span<const byte_t> source);
 
 	mdc_raw(const mdc_raw &)            = default;
